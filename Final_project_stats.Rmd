@@ -1,0 +1,646 @@
+---
+title: "Group Project DSE I1030"
+author: "Saar Turjeman, Safal Thapa, Sardor Hazratov"
+date: "2024-12-01"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+## Banana Quality Score Prediction  
+
+Dataset url:  https://www.kaggle.com/datasets/mrmars1010/banana-quality-dataset  
+
+```{r}
+#Importing libraries and setting up the environment
+suppressMessages(library(car))
+suppressMessages(library(lmtest))
+suppressMessages(library(caret))
+suppressMessages(library(caTools))
+suppressMessages(library(corrplot))
+suppressMessages(library(ggplot2))
+suppressMessages(library(scales))
+suppressMessages(library(tidyverse))
+suppressMessages(library(gridExtra))
+
+theme_set(new = theme_light())
+options(width = 150)
+```
+
+
+```{r}
+# Load the dataset, remove duplicates and handle missing values
+
+# Ensure reproducibility
+set.seed(42)
+
+dataset_filename <- "banana_quality_dataset.csv"
+invisible(suppressMessages(suppressWarnings(
+  df_banana <- read_csv(dataset_filename)
+)))
+
+
+invisible(capture.output(suppressMessages(str(df_banana))))
+invisible(table(duplicated(df_banana)))
+invisible(df_banana <- df_banana %>% distinct())
+invisible(df_banana <- na.omit(df_banana))
+invisible(sum(is.na(df_banana)))
+```
+
+Dataset includes 1000 rows and 16 columns.  
+Columns are:  
+- `sample_id` - A unique identifier assigned to each banana sample in the dataset. This allows the samples to be tracked and referenced uniquely.  (We can use this to remove duplicates if there are any)  
+- `variety` - The cultivar or breed of banana. Knowing the specific banana variety provides context about the sample's physical characteristics and growing conditions. Includes 8 distinct breeds: "Manzano", "Plantain", "Burro", "Red Dacca", "Fehi", "Lady Finger", "Blue Java", "Cavendish"  
+- `region` - Region of the sample that banana was grown. Includes 8 distinct values: "Colombia", "Guatemala", "Ecuador", "Costa Rica", "Brazil", "Honduras", "India", "Philippines"  
+- `quality_category` - A text label that categorizes the quality score into broader groupings of 4 distinct variables: "Processing", "Premium", "Good", "Unripe"  
+- `ripeness_index` - A numerical index representing the ripeness level of the banana, potentially ranging from 1 (green/unripe) to 10 (overripe). This quantifies the maturity of the fruit.  
+- `ripeness_category` - A text label that corresponds to the ripeness index. This gives a clear, qualitative ripeness classification. Contains 4 distinct values "Turning", "Ripe", "Overripe", "Green".  
+- `sugar_content_brix` - The sugar content of the banana measured in degrees Brix. This is a common way to assess the sweetness and quality of the fruit.  
+- `firmness_kgf` - The firmness of the banana measured in kilograms-force. This indicates the texture and maturity of the sample.  
+- `length_cm` - The length of the banana in centimeters. This size metric can vary by variety and growing conditions.  
+- `weight_g` - The weight of banana in grams.  
+- `harvest_date` - Harvesting date of the sample.  
+- `tree_age_years` - Age of the banana tree that sample was harvested.  
+- `altitude_m` - Altitude of the farm.  
+- `rainfall_mm` - Rainfall in mm in the area of the farm.  
+- `soil_nitrogen_ppm` - Soil nitrogen levels in ppm.  
+- `quality_score` - A numerical score,on a scale of 1-4 that rates the overall quality of the banana sample. This will be our predicted variable.
+
+
+### All categorical variables includes small number of distinct values, so converting them as factors wouldn't hurt.  
+Therefore, converting all character columns in df_banana to factors for proper analysis.  
+
+
+```{r}
+df_banana <- df_banana  %>% mutate(across(where(is.character), as.factor))
+```
+
+
+### A quick summary over banana dataset:  
+
+- The summary output provides an overview of the dataset, showing key statistics for each column.
+
+```{r}
+summary(df_banana)
+```
+
+#### The output highlights data distribution and variablity. Showing the range of qualit_score from 0.92 to 3.89, and a median of 2.44. For categorical variables, like vareity, it shows the counts, for instance, 'Plantain' appear 146 times.
+
+
+### - Histogram of Banana Quality Score. 
+
+```{r}
+hist(df_banana$quality_score,
+     main = "Distribution of Quality Score",
+     xlab = "Quality Score",
+     col = "green3", 
+     breaks = 20)  
+```
+
+#### The histogram shows the distribution of the "Quality Score" predicted variable. the scores are mostly between 2.0 and 3.0 forming normal distribution. 
+
+
+### Correlation Matrix
+
+- We produced the below correlation matrix to show the correlation between the independent variables and our predicted variable, quality score.
+
+```{r}
+# Compute and visualize the correlation matrix for numeric columns
+numericVars <- sapply(df_banana, is.numeric)
+numeric_data <- df_banana[, numericVars]
+
+if (ncol(numeric_data) > 1) {
+  cor_matrix <- cor(numeric_data, use = "pairwise.complete.obs")
+  
+  corrplot.mixed(
+    cor_matrix,
+    tl.col = "black",
+    tl.pos = "lt", 
+    tl.cex = 0.8,
+    number.cex = 0.7,
+  )
+}
+```
+
+#### The output above indicates that the three variable has mid/mid high positive correlation with our predicted variable. `ripeness_index`, `sugar_content_brix`  and `length_cm`, positively correlated with `quality_score`.  
+
+
+
+```{r}
+ggplot(df_banana, aes(x = ripeness_index, y = quality_score)) +
+  geom_point(color = "palegreen3", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "maroon3", se = F) + 
+  labs(title = "Ripeness Index vs. Quality Score ",
+       x = "Ripeness Index",
+       y = "Quality Score") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r}
+ggplot(df_banana, aes(x = sugar_content_brix, y = quality_score)) +
+  geom_point(color = "royalblue3", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "maroon3", se = F) + 
+  labs(title = "Sugar Content Brix vs. Quality Score ",
+       x = "Sugar Content Brix",
+       y = "Quality Score") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r}
+ggplot(df_banana, aes(x = length_cm, y = quality_score)) +
+  geom_point(color = "yellow4", alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red", se = F) + 
+  labs(title = "Length (in cm) vs. Quality Score ",
+       x = "Length (in cm)",
+       y = "Quality Score") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+#### The above three plots shows the linear relationship between `quality_score`, and `ripeness_index`, `sugar_content_brix`  and `length_cm`. The stright line in each line indicates the clear linear relationship between these variables and quality score.
+
+
+We also have categorical variables that needs to be analyzed as groups.  
+
+
+```{r}
+df_banana$ripeness_category <- factor(df_banana$ripeness_category , levels=c("Overripe", "Ripe", "Turning", "Green"))
+
+boxplot(quality_score ~ ripeness_category, data = df_banana,
+        main = "Quality Score by Ripeness Category",
+        xlab = "Ripeness Category",
+        ylab = "Quality Score",
+        col = c("lightgoldenrod3", "khaki1", "lightyellow", "darkolivegreen2"))
+```
+
+#### `Overripe`, `Ripe`, `Turning`, `Green` bananas has mean quality score 3.0, 2.6, 2.3, 2.0 respectively. Ripeness category represents `ripeness_index` in more common type. Conclusion is to use `ripeness_index` or `ripeness_category` as independent variable.  
+
+
+Box plots of `quality_score` vs `region`  
+
+```{r}
+# Boxplot for quality_score by region
+ggplot(df_banana, aes(x = region, y = quality_score, fill = region)) +
+  geom_boxplot(outlier.color = "blue", outlier.shape = 16, outlier.size = 2) +
+  labs(
+    title = "Box plot of Quality Score by Region",
+    x = "Region",
+    y = "Quality Score"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none"  
+  ) +
+  scale_fill_brewer(palette = "Dark2")
+```
+
+#### There is no strong influence of `region` on `quality_score`. However, this categorical variable will be analyzed later if it can be used as interaction with other variables.  
+
+Box plots of `quality_score` vs `variety`  
+```{r}
+# Boxplot for quality_score by variety
+ggplot(df_banana, aes(x = variety, y = quality_score, fill = variety)) +
+  geom_boxplot(outlier.color = "blue", outlier.shape = 16, outlier.size = 2) +
+  labs(
+    title = "Box plot of Quality Score by Variety",
+    x = "Variety",
+    y = "Quality Score"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none"  
+  ) +
+  scale_fill_brewer(palette = "Pastel1")
+```
+
+
+Lets analyze sugar content if it has interaction:  
+Scatter plots of `sugar_content_brix` vs `quality_score` grouped by variety.  
+```{r}
+ggplot(df_banana, aes(x = sugar_content_brix, y = quality_score)) +
+  geom_point(color = "yellow4", alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red", se = F) + 
+  labs(title = "Sugar content vs. Quality Score Grouped By Variety",
+       x = "Sugar content (in brix)",
+       y = "Quality Score") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  facet_wrap(~variety)
+```
+
+#### The above chart shows how ripeness index is related to quality score, broken down by varierty. In all varieties, we can see the trend lines are upward, with higher sugar content tend to have higher quality scores. The plots suggests a positive linear relationship across all banana varieties.
+
+```{r}
+ggplot(df_banana, aes(x = sugar_content_brix, y = quality_score)) +
+  geom_point(color = "darkgreen", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(
+    title = "Sugar Content Brix vs. Quality Score by Region",
+    x = "Sugar Content Brix",
+    y = "Quality Score"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  facet_wrap(~ region)
+
+```
+
+
+#### The above chart shows how sugar content is related to quality score, broken down by region. Each region hs it own plot. In all regions, the trend lines are upward, indicating that bananas with higher sugar content tend to have higher quality scores.
+
+```{r}
+# Boxplot for sugar_content_brix vs region
+ggplot(df_banana, aes(x = region, y = sugar_content_brix , fill = region)) +
+  geom_boxplot(outlier.color = "blue", outlier.shape = 16, outlier.size = 2) +
+  labs(
+    title = "Sugar Content vs Region",
+    y = "Sugar Content (brix)",
+    x = "Region"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none"  
+  ) +
+  scale_fill_brewer(palette = "Set2")
+```
+
+#### It seems like each region has different sugar levels. This signals that we can use interaction `sugar_content_brix:region` in our model.  
+
+
+Lets analyze length if it has interaction.  
+Scatter plots of `length_cm` vs `quality_score` grouped by variety
+.  
+```{r}
+ggplot(df_banana, aes(x = length_cm, y = quality_score)) +
+  geom_point(color = "thistle3", alpha = 0.7) +
+  geom_smooth(method = "lm", color = "red", se = F) + 
+  labs(title = "Length vs. Quality Score ",
+       x = "Length (in cm)",
+       y = "Quality Score") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  facet_wrap(~variety)
+```
+
+```{r}
+# Boxplot for length_cm vs region
+ggplot(df_banana, aes(x = variety, y =  length_cm, fill = variety)) +
+  geom_boxplot(outlier.color = "blue", outlier.shape = 16, outlier.size = 2) +
+  labs(
+    title = "Length (cm) vs Banana Variety",
+    y = "Length (cm)",
+    x = "Banana Variety"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none"  
+  ) +
+  scale_fill_brewer(palette = "Set2")
+```
+
+It seems like each variety has different mean for sugar levels. This signals that we can use interaction `length_cm:variety` in our model.  
+
+
+```{r}
+# Boxplot for quality_score vs by region
+ggplot(df_banana, aes(x = region, y = ripeness_index, fill = region)) +
+  geom_boxplot(outlier.color = "blue", outlier.shape = 16, outlier.size = 2) +
+  labs(
+    title = "Ripeness Index by Region",
+    x = "Region",
+    y = "Ripeness Index"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 25, vjust = 1, hjust = 1),
+  ) +
+  scale_fill_brewer(palette = "Set3") + facet_wrap(~variety, ncol = 3)
+```
+
+
+#### The chart above shows the ripeness index of bananas across different regions, grouped by variety. The heights of the boxes represent variability, while outliers are shown as individual points. The chart illustrates how ripeness levels differ between regions and varieties. 
+
+
+### Our insights from the EDA, is that ripeness index has a significant positive linear relationship with quality score. In addition, variability in quality score exists at different ripeness levels, suggesting that other factors like sugar content or regional differences may also be effective.
+
+### Research questions:
+
+- Is the linear linear relationship between ripeness index and quality score are statistically significant across all banana varieties and regions?
+
+- Are there significant interaction effects between ripeness index and other variables on quality score?
+
+We have selected these variables to use in our LM model.  
+
+- `ripeness_index`  
+- `sugar_content_brix`  
+- `variety`  
+- `variety:region`  
+- `sugar_content_brix:region`  
+- `variety:region:ripeness_index`  
+
+ (*response variable)  
+- `quality_score` 
+
+## Hypotheses testing
+
+- **Null Hypothesis (H₀)**: There is no linear relationship between ripeness index and quality score.
+- **Alternative Hypothesis (Ha)**: There is a linear relationship between ripeness index and quality score.
+
+
+```{r}
+hypo_model <- lm(quality_score ~ ripeness_index, data = df_banana)
+summary(hypo_model)
+```
+
+#### The above output tests whether there is a linear relationship between ripeness index and quality score. The p- value is extremely small, and the t-value of 29.28, indicates that the effect of ripeness index on quality score is signficiant. The model suggests that as ripeness index increases, quality score also increases, with ripeness explaining about 46% of the variation in quality score. 
+ 
+## Model training  
+
+### Splitting the data
+
+```{r}
+# Splitting the dataset into training and testing sets
+split <- sample.split(df_banana$quality_score, SplitRatio = 0.7)
+df_train <- subset(df_banana, split == TRUE)
+df_test <- subset(df_banana, split == FALSE)
+
+# Initializing K-Fold Cross-Validation (k = 5)
+train_control <- trainControl(method = "cv", number = 5)
+
+```
+
+### Building the model  
+
+#### Model 1: Model without Interaction  
+First we will evaluate our model without interaction:  
+```{r}
+model_no_interaction <- train(
+  quality_score ~ ripeness_index + variety + sugar_content_brix,
+  data = df_train, 
+  method = 'lm',
+  trControl = train_control
+  )
+model_no_interaction
+```
+
+5-fold cross validation shows us that sample size on each iteration was around ~564. These sample sizes were selected out of 705 samples and the remaining part was used as cross-validation. Since k=5 cross validation total number of samples (705) was divided to equal sizes of 5 (~=141). Each iteration randomly picks 20% (approximately ~141) of samples, for example if the first iteration selects 564 samples for training and the remaining 141 is selected for testing.  
+
+
+
+```{r}
+summary(model_no_interaction)
+```
+
+Key takeaway from above summary:  
+- The Residual Standard Error is 0.2423 which is small and indicates better fit.  
+- The R-squared value is 0.7995 which shows significant variability in response variable.  
+- ripeness_index and sugar_content_brix look to most impactful predictor with coefficients of 0.203883 and 0.157808 respectively.  
+- The residuals are relatively small and centered around zero which indicates good model performance.  
+
+
+### MODEL 1: (Model with no Interaction) Evaluation and Diagnostics.  
+
+### Plotting residual histogram:  
+Plot 1: Residuals Vs Fitted
+The residuals seems to be randomly scattered around the horizontal line (zero). This indicates that the model captures the relationship between the predictors and the response variable reasonably well, with no obvious patterns in the residuals. However, there might be slight clustering in some areas, which could suggest minor deviations or potential issues with model assumptions,
+
+Plot 2: Q-Q Residuals
+Most of the points follow the diagonal line, which shows the residuals are close to normally distributed. A few points at the ends (tails) are a bit off, which might mean there are outliers or small issues. Overall, this looks okay.
+
+Plot 3: Scale-Location
+The horizontal line has evenly spread points which indicates constant variance (homoscedasicity).
+
+Plot 4: Residuals vs Leverage
+Most points are near the center, but a few are close to or beyond the dotted Cook’s distance line. These points might have a big influence on the model. It’s a good idea to check them.
+
+```{r}
+model_no_in <- model_no_interaction$finalModel
+par(mfrow = c(2, 2)) 
+plot(model_no_in)
+```
+
+<!-- ### Fitted versus Residuals Plot   -->
+<!-- ```{r} -->
+<!-- plot(fitted(model_no_interaction), resid(model_no_interaction),  -->
+<!--      col = "grey", pch = 20, -->
+<!-- xlab = "Fitted", ylab = "Residuals", main = "Residuals vs Fitted from Model without Interaction") -->
+<!-- abline(h = 0, col = "red", lwd = 2) -->
+<!-- ``` -->
+
+### Breusch-Pagan Test  
+Testing for homoscedasticity; the test for constant variance.
+
+• 𝐻0: Homoscedasticity. The errors have constant variance about the true
+model.  
+• 𝐻1: Heteroscedasticity. The errors have non-constant variance about the
+true model.  
+
+```{r}
+base_model <- model_no_interaction$finalModel
+bptest(base_model)
+```
+In the above test, the p-value is 0.2323. We fail to reject the 
+null hypothesis at the common significance levels (0.05). 
+It means there is no significant evidence of heteroscedasticity in our model.
+
+### Histograms  
+We have a number of tools for assessing the normality assumption. The most
+obvious would be to make a histogram of the residuals. If it appears roughly
+normal, then we’ll believe the errors could truly be normal.
+
+```{r}
+hist(resid(model_no_interaction),
+xlab = "Residuals",
+main = "Histogram of Residuals, Model without Interaction",
+col = "darkorange",
+border = "dodgerblue",
+breaks = 20)
+```
+
+### Shapiro-Wilk Test    
+Null Hypothesis (Ho): The data (residuals) follow a normal distribution  
+Alternative Hypothesis(HA): The data(residuals) does not follow a normal distribution
+
+```{r}
+shapiro.test(resid(model_no_interaction))
+```
+### Above Shapiro-Wilk normality test result interpretation:  
+- The W-statistic is 0.97504 (close to 1) which indicate the data are somewhat close to a 
+normal distribution but not sure. 
+- The p-value, however, is very small (p = 1.334e-09) which < 0.005. So we
+reject the null hypothesis suggesting that the residuals do not follow a normal
+distribution. 
+
+### MODEL 2: Model with Interaction   
+
+```{r}
+model_with_interaction <- train(
+  quality_score ~ ripeness_index + variety + sugar_content_brix + variety:region + sugar_content_brix:region + variety:region:ripeness_index,
+  data = df_train,
+  method = 'lm',
+  trControl = train_control
+  )
+model_with_interaction
+```
+
+5-fold cross validation shows us that sample size on each iteration was around ~564. These sample sizes were selected out of 705 samples and the remaining part was used as cross-validation. Since k=5 cross validation total number of samples (705) was divided to equal sizes of 5 (~=141). Each iteration randomly picks 20% (approximately ~141) of samples, for example if the first iteration selects 564 samples for training and the remaining 141 is selected for testing.  
+
+```{r}
+summary(model_with_interaction)
+```
+
+Key takeaway from above summary:  
+- The Residual Standard Error is 0.2444 which is small and indicates better fit.  
+- The adjusted R-squared value is 0.7959 which shows significant variability in response variable.  
+- ripeness_index and sugar_content_brix look to most impactful predictor with coefficients of 0.2071369 and 0.1523781s respectively.  
+- The p-value is (< 2.2e-16) which indicate the model is highly significant i.e it explains variability in response variable significantly better than model with no predictors.  
+ 
+
+
+### MODEL 2: (Model with Interaction) Evaluation and Diagnostics.    
+
+### Plotting residual histogram:  
+Plot 1: Residuals Vs Fitted  
+Looking for two things:  
+1. At any fitted value, the mean of the residuals should be roughly 0. If this is
+the case, the linearity assumption is valid.  
+2. At every fitted value, the spread of the residuals should be roughly the same. 
+If this is the case, the constant variance assumption is valid.  
+
+In our above graph, we can see that both of these conditions are met by our model.  
+
+Plot 2: Q-Q Residuals  
+The points closely follow the dashed line, indicating that the residuals are fairly normally distributed, especially in the middle range. Both models have is some deviation at the tails, which suggests that the model might struggle with outliers or extreme values.  
+Model with interaction seems to be better when comparing QQ Residuals.  
+
+Plot 3: Scale-Location  
+The horizontal line has evenly spread points which indicates constant variance (homoscedasicity).
+
+Plot 4: Residuals vs Leverage  
+Most points are near the center and within the Cook's distance lines, which is good. However, a few points, such as X513 and X704, have higher leverage and may be influential on the model. 
+
+```{r}
+model_with_in <- model_with_interaction$finalModel
+par(mfrow = c(2, 2)) 
+plot(model_with_in)
+```
+
+<!-- ### Fitted versus Residuals Plot   -->
+<!-- ```{r} -->
+<!-- plot(fitted(model_with_interaction), resid(model_with_interaction),  -->
+<!--      col = "grey", pch = 20, -->
+<!-- xlab = "Fitted", ylab = "Residuals", main = "Residuals vs Fitted from Model with Interaction") -->
+<!-- abline(h = 0, col = "red", lwd = 2) -->
+<!-- ``` -->
+
+
+This model has nearly normal distribution indicating to valid statistical inference.  
+
+### Breusch-Pagan Test  
+Testing for homoscedasticity; the test for constant variance.
+
+• 𝐻0: Homoscedasticity. The errors have constant variance about the true
+model.  
+• 𝐻1: Heteroscedasticity. The errors have non-constant variance about the
+true model.  
+
+```{r}
+interaction_model <- model_with_interaction$finalModel
+bptest(interaction_model)
+```
+For the case of model with interaction, the p-value is equals to 0.4443 meaning
+that it is much greater than the typical threshold of 0.05. In this case we fail
+to reject the null hypothesis; meaning there is no evidence of heteroscedascity
+in the interaction model.  
+
+--------------------------------------------------------------------------------
+
+### Histograms  
+We have a number of tools for assessing the normality assumption. The most
+obvious would be to make a histogram of the residuals. If it appears roughly
+normal, then we’ll believe the errors could truly be normal.  
+
+```{r}
+hist(resid(model_with_interaction),
+xlab = "Residuals",
+main = "Histogram of Residuals, Model with Interaction",
+col = "darkorange",
+border = "dodgerblue",
+breaks = 20)
+```
+
+### Shapiro-Wilk Test    
+Null Hypothesis (Ho): The data (residuals) follow a normal distribution  
+Alternative Hypothesis (HA): The data (residuals) does not follow a normal distribution  
+
+```{r}
+shapiro.test(resid(interaction_model))
+```
+### Above: model with interaction test result interpretation:  
+- The W-statistic is close to 1 which indicate the data are somewhat close to a 
+normal distribution but not sure.  
+- The p-value p = 3.748e-06 which is extremely small and much smaller than 
+the common threshold of 0.005.  
+So we reject the null hypothesis suggesting that the residuals slightly deviate 
+from normality.  
+
+### Evaluation of test data on both models:  
+```{r}
+
+df_test2 <- df_test  # make copy
+
+df_test$predicted_quality_score <- predict(model_no_interaction, newdata = df_test)
+df_test2$predicted_quality_score <- predict(model_with_interaction, newdata = df_test2)
+
+par(mfrow=c(2,2), mar=c(4,4,2,0.5))
+
+# first model
+plot1 <- ggplot(df_test, aes(x = quality_score, y = predicted_quality_score)) +
+  geom_point(alpha = 0.7, color = "seagreen3") +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red", linewidth=0.9) +
+  labs(
+    title = "Test Data \n Actual vs Predicted Quality Score",
+    x = "Predicted Quality Score (No Interaction Model)",
+    y = "Actual Quality Score"
+  ) +
+  theme_minimal()
+
+# second model
+plot2 <- ggplot(df_test2, aes(x = quality_score, y = predicted_quality_score)) +
+  geom_point(alpha = 0.7, color = "lightskyblue") +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red", linewidth=0.9) +
+  labs(
+    title = "Test Data \n Actual vs Predicted Quality Score",
+    x = "Predicted Quality Score (Model With Interaction)",
+    y = "Actual Quality Score"
+  ) +
+  theme_minimal()
+
+grid.arrange(plot1, plot2, ncol=2)
+
+```
+
+The left plot represents the residuals from Model 1 (without interaction)  
+The right plot represents the residuals from Model 2 (with interaction)  
+Adding interaction terms enhances the model performance. The interaction terms reduces the residuals making it better for the data.  
+Overall the model with interaction is the better model.  
+The green points in the scatter plot represent residuals from Model 1 (without interaction) and blue points represent residuals from Model 2 ( With interaction)
+  
+  
+### Conclusion:
+
+The results of the above models indicate that both models (with and without interaction terms) performed very well. The model with interaction terms showed a slightly higher residual variability (standard error) compared to the model without interactions, but it captured the complexity of the data better by incorporating important relationships between predictors. The model without interaction terms had lower RMSE and residual variance, indicating better simplicity and consistency, but it may overlook valuable information provided by interactions. To improve the model,we could remove non-significant interaction terms to reduce complexity and focus only on meaningful relationships, while testing other regularization techniques like ridge or lasso regression. 
+We decided to remove the independent variable length_cm because the results showed that the model was over fitting. After removing this variable, we obtained more stable and reliable results.
+
